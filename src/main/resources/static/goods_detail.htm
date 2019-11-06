@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"> <!--配置兼容layer的浏览器内核-->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>商品详情</title>
+
+    <!--jquery.js-->
+    <script type="text/javascript" src="/js/jquery-3.4.1.min.js"></script>
+    <!--bootstrap-->
+    <!--<link rel="stylesheet" href="https://cdn.bootcss.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">-->
+    <!--<script src="https://cdn.bootcss.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>-->
+    <script type="text/javascript" src="/bootstrap-4.0.0-dist/js/bootstrap.js"></script>
+    <link rel="stylesheet" type="text/css" href="/bootstrap-4.0.0-dist/css/bootstrap.css" />
+    <!--jquery-validation-1.14.0 注意：在引入jquery.validate之前一定要先引入jquery，因为jquery是jquery.validate的基础-->
+    <script type="text/javascript" src="/jquery-validation-1.14.0/dist/jquery.validate.js"></script>
+    <script type="text/javascript" src="/jquery-validation-1.14.0/dist/localization/messages_zh.js"></script>
+    <!--layer.js-->
+    <script type="text/javascript" src="/layer/layer.js"></script>
+    <!--md5.js-->
+    <script type="text/javascript" src="/js/md5npm.js"></script>
+    <!--common.js-->
+    <script type="text/javascript" src="/js/common.js"></script>
+
+</head>
+<body>
+
+<div class="panel panel-default">
+    <div class = "panel-heading">秒杀商品详情</div>
+
+    <div class = "panel-body">
+        <span id="userTip">您还没有登录，请登录后再操作<br/></span>
+        <span>没有收货地址的提示。。。</span>
+    </div>
+
+    <table class="table" id="goodsList">
+        <tr>
+            <td>商品名称</td>
+            <td colspan="3" id="goodsName"></td>
+        </tr>
+        <tr>
+            <td>商品图片</td>
+            <td colspan="3"><img id="goodsImg" width="200" height="200" /></td>
+        </tr>
+        <tr>
+            <td>秒杀开始时间</td>
+            <td id="startTime"></td>
+            <td>
+                <input type="hidden" id="remainSeconds" /><!-- 隐藏商品id -->
+                <span id="miaoshaTip"></span>
+            </td>
+            <td>
+             <!--
+                <form id="miaoshaForm" method="post" action="/miaosha/do_miaosha">
+                    <button class="btn btn-primary btn-block" type="submit" id="buyButton" >立即秒杀</button>
+                    <input type="hidden" name="goodsId" id="goodsId"/>
+                </form>
+                -->
+                <button class="btn btn-primary btn-block" type="button" id="buyButton" onclick="doMiaosha()">立即秒杀</button>
+                <input type="hidden" name="goodsId" id="goodsId"/>
+            </td>
+        </tr>
+        <tr>
+            <td>商品原价</td>
+            <td colspan="3" id="goodsPrice"></td>
+        </tr>
+        <tr>
+            <td>秒杀价</td>
+            <td colspan="3" id="miaoshaPrice"></td>
+        </tr>
+        <tr>
+            <td>库存数量</td>
+            <td colspan="3" id="stockCount"></td>
+        </tr>
+    </table>
+</div>
+
+</body>
+<script>
+    $(function(){
+        //从服务端请求数据
+        var goodsId = getUrlParam("goodsId");
+        console.log(goodsId);
+        $.ajax({
+            url:"/goods/detail/" + goodsId,
+            type:"GET",
+            async:true,
+            success:function(data){
+                console.log("state = " + data.state);
+                if(data.state == 0){
+                    render(data.data);
+                }else {
+                    layer.msg(data.data.msg);
+                }
+            },
+            error:function () {
+                layer.msg("请求错误");
+            }
+        });
+    });
+
+
+    //// 响应立即秒杀按钮，向服务端传递参数goodsId，使服务器下订单
+    function doMiaosha(){
+        $.ajax({
+            url:"/miaosha/do_miaosha",
+            type:"POST",
+            async:true,
+            data:{
+                goodsId:$("#goodsId").val()
+            },
+            success:function(data){
+                console.log("state = " + data.state);
+                console.log("id = " + data.data.id);
+                if(data.state == 0){ //返回成功，表示正在消息队列里排队等候消息队列接收（等待减库存和下订单的消息队列），此时轮询地访问服务器是否秒杀成功
+                    getMiaoshaResult($("#goodsId").val());
+                }else {
+                    layer.msg(data.data.msg);//输出异常消息
+                }
+            },
+            error:function () {
+                layer.msg("请求错误");
+            }
+        });
+    }
+
+
+    //展示loading
+    function g_showLoading(){
+        layer.msg('排队中...', {icon: 16,shade: [0.5, '#f5f5f5'],scrollbar: false,offset: '0px', time:100000});
+    };
+
+
+    //轮询访问服务器是否秒杀成功
+    function getMiaoshaResult(goodsId){
+        // g_showLoading();
+
+        $.ajax({
+            url:"/miaosha/result",
+            type:"GET",
+            data:{
+                goodsId:$("#goodsId").val()
+            },
+            success:function(data){
+                console.log("state = " + data.state);
+                console.log("id = " + data.data.id);
+                //data.state=0表示没有异常
+                if(data.state == 0){
+                    //result，小于0秒杀失败，==0继续排队，>0表示秒杀成功，此时result为秒杀商品成功时生成的订单id
+                    var result = data.data;
+                    if(result < 0){
+                        layer.msg("秒杀失败", {icon: 2});
+                    }else if(result == 0){
+                        //5000ms一次轮询访问服务器
+                        setTimeout(function(){
+                            getMiaoshaResult(goodsId);
+                        },50);
+
+                    }else if(result > 0){
+                        console.log("result = " + result);
+                        layer.closeAll();
+                        layer.confirm("恭喜您，秒杀成功！查看订单？",{btn:["确定", "取消"]},
+                            function(){//确定查看订单
+                                window.location.href="/order_detail.htm?orderId=" + result;
+                            },
+                            function(){
+                                layer.closeAll();
+                            }
+                        );
+                    }
+
+                }else {
+                    layer.msg(data.data.msg, {icon: 2});//输出异常消息
+                }
+            },
+            error:function () {
+                layer.msg("请求错误");
+            }
+        });
+    }
+
+    //渲染页面
+    function render(detail){
+        var miaoshaStatus = detail.miaoshaStatus;//秒杀状态，0未开始，1进行中，2已结束
+        var remainSeconds = detail.remainSeconds;//还剩 remainSeconds秒 开始秒杀
+        var goodsVo = detail.goodsVo;
+        var miaoshaUser = detail.miaoshaUser;
+
+        if(miaoshaUser){
+            $("#userTip").hide();
+        }
+        $("#goodsName").text(goodsVo.goodsName);
+        $("#goodsImg").attr("src",goodsVo.goodsImg);
+        $("#startTime").text(new Date(goodsVo.startDate).format("yyyy-MM-dd hh:mm:ss"));
+        $("#remainSeconds").val(remainSeconds);
+        $("#goodsId").val(goodsVo.id);
+        $("#goodsPrice").text(goodsVo.goodsPrice);
+        $("#miaoshaPrice").text(goodsVo.miaoshaPrice);
+        $("#stockCount").text(goodsVo.stockCount);
+
+        countDown();
+
+    };
+
+    //立即秒杀的倒计时
+    function countDown() {
+        var remainSeconds = $("#remainSeconds").val();//有可能是0，-1，和任何大于0的数
+        var timeout;
+        if(remainSeconds > 0){//秒杀还没开始，设置立即秒杀按钮不可用，设置倒计时时间，设置隐藏的倒计时
+            $("#buyButton").attr("disabled",true);
+            $("#miaoshaTip").html("秒杀倒计时" + remainSeconds + "秒");
+
+            //修改时间，每1000ms调用一次countDown()
+            timeout = setTimeout(function () {
+                $("#countDown").text(remainSeconds - 1);
+                $("#remainSeconds").val(remainSeconds - 1);
+                countDown();
+            }, 1000);
+
+        }else if(remainSeconds == 0){//秒杀进行中
+            $("#buyButton").attr("disabled",false);
+
+            if(timeout){
+                clearTimeout(timeout);
+            }
+
+            //修改文案
+            $("#miaoshaTip").html("秒杀进行中");
+
+        }else{ //秒杀已结束
+            $("#buyButton").attr("disabled",true);
+
+            //修改文案
+            $("#miaoshaTip").html("秒杀已结束");
+        }
+
+    };
+
+    // 获取URL参数
+    function getUrlParam(name){
+        // console.log("getUrlParam(name)函数");
+        // console.log(name);
+        // console.log("知道了");
+        var reg = new RegExp("(^|&)"+ name +"=([^&]*)(&|$)");
+        var r = window.location.search.substr(1).match(reg);
+        if (r!=null) {
+            return unescape(r[2]);
+        }
+        return null;
+
+    };
+
+    //自定义日期，使用方法如下：
+    // var date = new Date(); date.format("yyyy-MM-dd hh:mm:ss")
+    Date.prototype.format = function(format){
+        var o =  {
+            "M+" : this.getMonth()+1, //month
+            "d+" : this.getDate(), //day
+            "h+" : this.getHours(), //hour
+            "m+" : this.getMinutes(), //minute
+            "s+" : this.getSeconds() //second
+            // "q+" : Math.floor((this.getMonth()+3)/3), //quarter
+            // "S" : this.getMilliseconds() //millisecond
+        };
+        if(/(y+)/.test(format)){
+            format = format.replace(RegExp.$1, (this.getFullYear()+"").substr(4 - RegExp.$1.length));
+        }
+        for(var k in o)  {
+            if(new RegExp("("+ k +")").test(format)){
+                format = format.replace(RegExp.$1, RegExp.$1.length==1 ? o[k] : ("00"+ o[k]).substr((""+ o[k]).length));
+            }
+        }
+        return format;
+    };
+
+</script>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
